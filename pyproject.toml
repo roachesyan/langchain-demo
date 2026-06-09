@@ -13,3 +13,10 @@ dependencies = [
 
 [project.scripts]
 running-advisor = "main:run"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["main", "config", "weather_tools"]

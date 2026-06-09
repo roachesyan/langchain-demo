@@ -15,11 +15,9 @@ LangChain 跑步天气顾问 Demo
 """
 
 from langchain_openai import ChatOpenAI
-from langchain.agents import create_tool_calling_agent, AgentExecutor
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.memory import InMemorySaver
 
 from config import ZHIPU_API_KEY, ZHIPU_BASE_URL, ZHIPU_MODEL, LOCATION
 from weather_tools import get_current_weather, get_weather_alerts, get_air_quality
@@ -47,10 +45,11 @@ tools = [get_current_weather, get_weather_alerts, get_air_quality]
 # ============================================================
 # Agent 接收用户问题后，自主判断需要调用哪些工具，
 # 然后综合所有工具返回的信息，给出最终建议。
+#
+# LangChain 1.x 使用 create_agent（基于 LangGraph），
+# 取代了旧版的 create_tool_calling_agent + AgentExecutor。
 
-PROMPT_TEMPLATE = ChatPromptTemplate.from_messages([
-    # 系统提示词 - 定义 Agent 的角色和行为规范
-    ("system", """你是一位专业的跑步天气顾问。
+SYSTEM_PROMPT = """你是一位专业的跑步天气顾问。
 
 任务：根据用户所在城市的天气数据，判断今天是否适合户外跑步。
 
@@ -68,47 +67,22 @@ PROMPT_TEMPLATE = ChatPromptTemplate.from_messages([
   2. 适合跑步的因素 / 不适合的因素
   3. 跑步建议（推荐时段、装备、注意事项）
 
-当前城市：{{location}}""".replace("{{location}}", LOCATION)),
-
-    # 用户输入
-    ("user", "{input}"),
-
-    # Agent 工具调用的中间步骤（必须保留）
-    MessagesPlaceholder(variable_name="agent_scratchpad"),
-
-    # 对话历史（用于 Memory）
-    MessagesPlaceholder(variable_name="chat_history"),
-])
-
-agent = create_tool_calling_agent(llm, tools, PROMPT_TEMPLATE)
-
-agent_executor = AgentExecutor(
-    agent=agent,
-    tools=tools,
-    verbose=True,
-    max_iterations=5,
-)
+当前城市：""" + LOCATION
 
 # ============================================================
 # 4. 记忆 (Memory) - 跨对话保持上下文
 # ============================================================
-# 用一个简单的字典存储不同 session 的对话历史。
-# 生产环境可替换为 Redis / 数据库等持久化存储。
+# LangChain 1.x 通过 LangGraph 的 checkpointer 实现记忆。
+# InMemorySaver 将对话状态保存在内存中，按 thread_id 区分会话。
+# 生产环境可替换为 SqliteSaver / PostgresSaver 等持久化实现。
 
-_session_store: dict[str, ChatMessageHistory] = {}
+_memory = InMemorySaver()
 
-
-def _get_session_history(session_id: str) -> ChatMessageHistory:
-    if session_id not in _session_store:
-        _session_store[session_id] = ChatMessageHistory()
-    return _session_store[session_id]
-
-
-agent_with_memory = RunnableWithMessageHistory(
-    agent_executor,
-    _get_session_history,
-    input_messages_key="input",
-    history_messages_key="chat_history",
+agent = create_agent(
+    model=llm,
+    tools=tools,
+    system_prompt=SYSTEM_PROMPT,
+    checkpointer=_memory,
 )
 
 # ============================================================
@@ -117,11 +91,11 @@ agent_with_memory = RunnableWithMessageHistory(
 
 def ask(question: str, session_id: str = "default") -> str:
     """向跑步顾问提问（支持多轮对话）"""
-    response = agent_with_memory.invoke(
-        {"input": question},
-        config={"configurable": {"session_id": session_id}},
+    response = agent.invoke(
+        {"messages": [HumanMessage(content=question)]},
+        config={"configurable": {"thread_id": session_id}},
     )
-    return response["output"]
+    return response["messages"][-1].content
 
 
 def run() -> None:
