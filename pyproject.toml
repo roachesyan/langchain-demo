@@ -1,0 +1,15 @@
+[project]
+name = "langchain-running-advisor"
+version = "0.1.0"
+description = "LangChain Demo: 基于天气数据判断今天是否适合跑步"
+requires-python = ">=3.11"
+dependencies = [
+    "langchain>=0.3.0",
+    "langchain-openai>=0.3.0",
+    "langchain-community>=0.3.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+]
+
+[project.scripts]
+running-advisor = "main:run"

@@ -1,0 +1,5 @@
+services:
+  running-advisor:
+    build: .
+    env_file:
+      - .env
